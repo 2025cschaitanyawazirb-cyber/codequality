@@ -1,5 +1,10 @@
-import os
-def add(a,b):
-    unused = 5
-    return a+b
-x=add(1,2)
+"""A small example module that passes code quality checks."""
+
+
+def add(a, b):
+    """Return the sum of two numbers."""
+    return a + b
+
+
+if __name__ == "__main__":
+    print(add(1, 2))
