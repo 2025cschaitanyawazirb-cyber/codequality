@@ -1,20 +1,9 @@
-import os
-import re
-import subprocess
-import sys
-import tempfile
-
 from flask import Flask, render_template_string, request
+
+from analyzers import run_checks
 
 app = Flask(__name__)
 MAX_CHARS = 10000
-PASS_SCORE = 7.0
-
-FLAKE_RE = re.compile(r"^.*?:(\d+):(\d+): ([A-Z]\d+) (.*)$")
-PYLINT_RE = re.compile(r"^.*?:(\d+):(\d+): ([A-Z]\d+): (.*?)(?: \(([\w-]+)\))?$")
-SCORE_RE = re.compile(r"rated at (-?[\d.]+)/10")
-
-SEVERITY = {"E": "Error", "F": "Fatal", "W": "Warning", "C": "Convention", "R": "Refactor"}
 
 PAGE = r'''
 <!doctype html>
@@ -35,7 +24,6 @@ PAGE = r'''
       --accent2: #22d3ee;
       --ok: #22c55e;
       --bad: #ef4444;
-      --warn: #f59e0b;
     }
     * { box-sizing: border-box; }
     body {
@@ -48,7 +36,7 @@ PAGE = r'''
         radial-gradient(800px 500px at 110% 10%, rgba(34, 211, 238, 0.25), transparent 60%),
         var(--bg);
     }
-    .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 60px; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 20px 60px; }
 
     nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 36px; }
     .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
@@ -67,12 +55,11 @@ PAGE = r'''
       background: linear-gradient(90deg, #fff, #c4b5fd, #67e8f9);
       -webkit-background-clip: text; background-clip: text; color: transparent;
     }
-    .hero p { margin: 0 auto; max-width: 620px; color: var(--muted); font-size: 1.05rem; }
+    .hero p { margin: 0 auto; max-width: 640px; color: var(--muted); font-size: 1.05rem; }
 
     .card {
       background: rgba(18, 26, 46, 0.85); border: 1px solid var(--line);
       border-radius: 18px; padding: 22px; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
-      backdrop-filter: blur(8px);
     }
 
     .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -84,8 +71,7 @@ PAGE = r'''
     .ghost:hover { color: var(--text); border-color: var(--accent); }
 
     .editor-wrap {
-      position: relative; border-radius: 12px; border: 1px solid var(--line);
-      background: var(--panel2); overflow: hidden;
+      border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); overflow: hidden;
     }
     .editor-wrap::before {
       content: "main.py"; display: block; padding: 10px 14px; font-size: 12px; color: var(--muted);
@@ -112,8 +98,7 @@ PAGE = r'''
       background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.4); color: #fecaca;
     }
 
-    .summary { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 14px; margin-top: 26px; }
-    @media (max-width: 760px) { .summary { grid-template-columns: 1fr 1fr; } }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 26px; }
     .tile {
       background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
       display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
@@ -134,13 +119,14 @@ PAGE = r'''
     }
 
     h3 { margin: 30px 0 12px; font-size: 1.05rem; }
+    .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
     th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
     td.msg { line-height: 1.45; }
-    .code { font-family: Consolas, monospace; color: #c4b5fd; }
+    .code { font-family: Consolas, monospace; color: #c4b5fd; white-space: nowrap; }
     .badge {
-      display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap;
     }
     .badge.E, .badge.F { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
     .badge.W { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
@@ -165,12 +151,12 @@ PAGE = r'''
   <div class="wrap">
     <nav>
       <div class="brand"><div class="logo">CQ</div>CodeCheck</div>
-      <span class="pill">flake8 + pylint</span>
+      <span class="pill">flake8 + pylint + bandit + radon</span>
     </nav>
 
     <section class="hero">
       <h1>Automated Code Quality Checker</h1>
-      <p>Paste your Python code and get instant style, bug, and quality feedback, the same checks that run in our GitHub Actions pipeline.</p>
+      <p>Paste Python code to check style, bugs, security risks, and complexity, the same checks that run in our GitHub Actions pipeline.</p>
     </section>
 
     <div class="card">
@@ -179,6 +165,8 @@ PAGE = r'''
           <div class="group">
             <button type="button" class="ghost" onclick="load('clean')">Clean example</button>
             <button type="button" class="ghost" onclick="load('messy')">Messy example</button>
+            <button type="button" class="ghost" onclick="load('security')">Security risks</button>
+            <button type="button" class="ghost" onclick="load('complex')">Complex function</button>
             <button type="button" class="ghost" onclick="load('syntax')">Syntax error</button>
           </div>
           <button type="button" class="ghost" onclick="clearBox()">Clear</button>
@@ -216,26 +204,36 @@ PAGE = r'''
             <div class="big">{{ result.pylint_count }}</div>
             <div class="label">Quality issues (pylint)</div>
           </div>
+          <div class="tile">
+            <div class="big">{{ result.security_count }}</div>
+            <div class="label">Security findings (bandit)</div>
+          </div>
+          <div class="tile">
+            <div class="big">{{ result.complexity_count }}</div>
+            <div class="label">Complex functions (radon)</div>
+          </div>
         </div>
 
         <h3>Issues found</h3>
         {% if result.issues %}
-          <table>
-            <thead>
-              <tr><th>Line</th><th>Tool</th><th>Code</th><th>Severity</th><th>Message</th></tr>
-            </thead>
-            <tbody>
-              {% for issue in result.issues %}
-              <tr>
-                <td>{{ issue.line }}</td>
-                <td>{{ issue.tool }}</td>
-                <td class="code">{{ issue.code }}</td>
-                <td><span class="badge {{ issue.letter }}">{{ issue.severity }}</span></td>
-                <td class="msg">{{ issue.msg }}{% if issue.symbol %} <span class="muted">({{ issue.symbol }})</span>{% endif %}</td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Line</th><th>Tool</th><th>Code</th><th>Severity</th><th>Message</th></tr>
+              </thead>
+              <tbody>
+                {% for issue in result.issues %}
+                <tr>
+                  <td>{{ issue.line }}</td>
+                  <td>{{ issue.tool }}</td>
+                  <td class="code">{{ issue.code }}</td>
+                  <td><span class="badge {{ issue.letter }}">{{ issue.severity }}</span></td>
+                  <td class="msg">{{ issue.msg }}{% if issue.symbol %} <span class="muted">({{ issue.symbol }})</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         {% else %}
           <div class="empty">No issues found. Your code is clean.</div>
         {% endif %}
@@ -251,7 +249,7 @@ PAGE = r'''
       {% endif %}
     </div>
 
-    <footer>Built with Python, Flask, flake8, and pylint</footer>
+    <footer>Built with Python, Flask, flake8, pylint, bandit, and radon</footer>
   </div>
 
   <script>
@@ -273,6 +271,42 @@ def add(a,b):
     unused = 5
     return a+b
 x=add(1,2)
+`,
+      security: `import os
+
+password = "admin123"
+
+
+def run(user_input):
+    return eval(user_input)
+`,
+      complex: `def score_user(a, b, c, d):
+    total = 0
+    if a > 1:
+        total += 1
+    if a > 2:
+        total += 1
+    if a > 3:
+        total += 1
+    if b > 1:
+        total += 1
+    if b > 2:
+        total += 1
+    if b > 3:
+        total += 1
+    if c > 1:
+        total += 1
+    if c > 2:
+        total += 1
+    if c > 3:
+        total += 1
+    if d > 1:
+        total += 1
+    if d > 2:
+        total += 1
+    if d > 3:
+        total += 1
+    return total
 `,
       syntax: `def greet(name)
     print("Hello", name
@@ -297,76 +331,6 @@ x=add(1,2)
 </body>
 </html>
 '''
-
-COLORS = {"E": "#ef4444", "F": "#ef4444", "W": "#f59e0b", "C": "#22d3ee", "R": "#7c5cff"}
-
-
-def run_checks(code):
-    normalized = code.replace("\r\n", "\n").replace("\r", "\n").rstrip() + "\n"
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as f:
-        f.write(normalized)
-        path = f.name
-    try:
-        flake = subprocess.run(
-            [sys.executable, "-m", "flake8", path],
-            capture_output=True, text=True, timeout=30,
-        )
-        pylint = subprocess.run(
-            [sys.executable, "-m", "pylint", path],
-            capture_output=True, text=True, timeout=60,
-        )
-    finally:
-        os.remove(path)
-
-    issues = []
-    for line in flake.stdout.splitlines():
-        m = FLAKE_RE.match(line)
-        if m:
-            line_no, _col, code_id, msg = m.groups()
-            issues.append({"tool": "flake8", "line": int(line_no), "code": code_id,
-                           "msg": msg, "symbol": ""})
-
-    for line in pylint.stdout.splitlines():
-        m = PYLINT_RE.match(line)
-        if m:
-            line_no, _col, code_id, msg, symbol = m.groups()
-            issues.append({"tool": "pylint", "line": int(line_no), "code": code_id,
-                           "msg": msg, "symbol": symbol or ""})
-
-    for issue in issues:
-        letter = issue["code"][0]
-        issue["letter"] = letter
-        issue["severity"] = SEVERITY.get(letter, "Other")
-    issues.sort(key=lambda i: i["line"])
-
-    combined = pylint.stdout + "\n" + pylint.stderr
-    match = SCORE_RE.search(combined)
-    score = float(match.group(1)) if match else None
-
-    flake_count = sum(1 for i in issues if i["tool"] == "flake8")
-    pylint_count = sum(1 for i in issues if i["tool"] == "pylint")
-    passed = flake_count == 0 and score is not None and score >= PASS_SCORE
-
-    if score is None:
-        color = "#64748b"
-    elif score >= 8:
-        color = "#22c55e"
-    elif score >= 5:
-        color = "#f59e0b"
-    else:
-        color = "#ef4444"
-
-    return {
-        "issues": issues,
-        "flake_count": flake_count,
-        "pylint_count": pylint_count,
-        "score_text": f"{score:.1f}" if score is not None else "n/a",
-        "pct": int(score * 10) if score is not None else 0,
-        "color": color,
-        "passed": passed,
-        "raw_flake": flake.stdout.strip() or "No style issues found.",
-        "raw_pylint": combined.strip() or "No output.",
-    }
 
 
 @app.route("/", methods=["GET", "POST"])
