@@ -113,9 +113,11 @@ def run_checks(code):
     issues.sort(key=lambda i: i["line"])
 
     flake_count = len(flake_issues)
+    # Only syntax errors (E9xx) block the verdict. Style warnings are still shown.
+    flake_blocking = sum(1 for i in flake_issues if i["code"].startswith("E9"))
     security_high = sum(1 for i in bandit_issues if i["letter"] == "E")
     passed = (
-        flake_count == 0
+        flake_blocking == 0
         and security_high == 0
         and score is not None
         and score >= PASS_SCORE
