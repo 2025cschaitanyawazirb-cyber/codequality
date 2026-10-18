@@ -10,3 +10,4 @@ A tool that automatically analyzes Python code for style errors, bugs, and quali
 - flake8 and pylint
 
 ## How to run locally
+![Code Quality Check](https://github.com/2025cschaitanyawazirb-cyber/codequality/actions/workflows/code-quality.yml/badge.svg)
