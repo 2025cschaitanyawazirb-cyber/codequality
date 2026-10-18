@@ -2,3 +2,5 @@ flake8
 pylint
 flask
 gunicorn
+flask
+gunicorn
