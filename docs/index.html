@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Automated Code Quality Checker</title>
+  <style>
+    :root {
+      --bg: #0b1020; --panel: #121a2e; --panel2: #0f1628; --line: #23304d;
+      --text: #e6ebf5; --muted: #8b97b5; --accent: #7c5cff; --accent2: #22d3ee;
+      --ok: #22c55e; --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--text);
+      font-family: "Segoe UI", Inter, Roboto, Arial, sans-serif;
+      background:
+        radial-gradient(900px 500px at 10% -10%, rgba(124, 92, 255, 0.35), transparent 60%),
+        radial-gradient(800px 500px at 110% 10%, rgba(34, 211, 238, 0.25), transparent 60%),
+        var(--bg);
+    }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 60px; }
+    nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+    .logo {
+      width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent2)); font-size: 14px;
+    }
+    .pill { font-size: 13px; color: var(--muted); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; }
+    .hero { text-align: center; margin-bottom: 28px; }
+    .hero h1 {
+      margin: 0 0 10px; font-size: 2.4rem; letter-spacing: -0.02em;
+      background: linear-gradient(90deg, #fff, #c4b5fd, #67e8f9);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .hero p { margin: 0 auto; max-width: 640px; color: var(--muted); font-size: 1.05rem; }
+    .card {
+      background: rgba(18, 26, 46, 0.85); border: 1px solid var(--line); border-radius: 18px;
+      padding: 22px; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.35);
+    }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ghost {
+      background: transparent; color: var(--muted); border: 1px solid var(--line);
+      padding: 8px 14px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .ghost:hover { color: var(--text); border-color: var(--accent); }
+    .editor { border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); overflow: hidden; }
+    .editor-title {
+      padding: 10px 14px; font-size: 12px; color: var(--muted);
+      border-bottom: 1px solid var(--line); font-family: Consolas, monospace;
+    }
+    textarea {
+      width: 100%; min-height: 320px; padding: 16px; border: none; outline: none; resize: vertical;
+      background: transparent; color: #e2e8f0; font-family: Consolas, "Courier New", monospace;
+      font-size: 14px; line-height: 1.6; tab-size: 4;
+    }
+    textarea:focus { box-shadow: inset 0 0 0 2px rgba(124, 92, 255, 0.6); }
+    .footer-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .submit {
+      background: linear-gradient(90deg, var(--accent), #4f8cff); color: #fff; border: none;
+      padding: 12px 26px; border-radius: 11px; font-size: 15px; font-weight: 700; cursor: pointer;
+      box-shadow: 0 10px 25px rgba(124, 92, 255, 0.35);
+    }
+    .submit:disabled { opacity: 0.5; cursor: not-allowed; }
+    #status {
+      margin-top: 16px; padding: 12px 16px; border-radius: 12px; font-size: 14px;
+      background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+    }
+    #status.error { background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.4); color: #fecaca; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-top: 26px; }
+    .tile {
+      background: var(--panel2); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+      text-align: center; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    }
+    .tile .big { font-size: 26px; font-weight: 800; }
+    .tile .label { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .verdict { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; }
+    .pass { color: var(--ok); }
+    .fail { color: var(--bad); }
+    h3 { margin: 30px 0 12px; font-size: 1.05rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .code { font-family: Consolas, monospace; color: #c4b5fd; white-space: nowrap; }
+    .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .badge.E, .badge.F { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+    .badge.C { background: rgba(34, 211, 238, 0.15); color: #67e8f9; }
+    .badge.R { background: rgba(124, 92, 255, 0.2); color: #c4b5fd; }
+    .empty {
+      text-align: center; padding: 26px; border-radius: 12px; background: rgba(34, 197, 94, 0.08);
+      color: #86efac; border: 1px dashed rgba(34, 197, 94, 0.4);
+    }
+    footer { text-align: center; color: var(--muted); margin-top: 36px; font-size: 13px; }
+    footer a { color: #67e8f9; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="brand"><div class="logo">CQ</div>CodeCheck</div>
+      <span class="pill">Runs in your browser</span>
+    </nav>
+
+    <section class="hero">
+      <h1>Automated Code Quality Checker</h1>
+      <p>Paste Python code to check for syntax errors, logic bugs, style issues, and complexity. Everything runs in your browser, so nothing is sent to a server.</p>
+    </section>
+
+    <div class="card">
+      <div class="toolbar">
+        <div class="group">
+          <button class="ghost" onclick="load('clean')">Clean example</button>
+          <button class="ghost" onclick="load('messy')">Messy example</button>
+          <button class="ghost" onclick="load('complex')">Complex function</button>
+          <button class="ghost" onclick="load('syntax')">Syntax error</button>
+        </div>
+        <button class="ghost" onclick="clearBox()">Clear</button>
+      </div>
+
+      <div class="editor">
+        <div class="editor-title">main.py</div>
+        <textarea id="code" spellcheck="false" placeholder="# Paste your Python code here..."></textarea>
+      </div>
+
+      <div class="footer-row">
+        <span class="muted" id="count">0 / 10000 characters · Ctrl + Enter to check</span>
+        <button class="submit" id="check" onclick="check()" disabled>Check code</button>
+      </div>
+
+      <div id="status">Starting up...</div>
+      <div id="results"></div>
+    </div>
+
+    <footer>
+      Built with Python, Pyodide, pyflakes, pycodestyle, and radon ·
+      <a href="https://github.com/2025cschaitanyawazirb-cyber/codequality">View source on GitHub</a>
+    </footer>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script>
+    const MAX = 10000;
+    let pyodide = null;
+
+    const EXAMPLES = {
+      clean: `"""Add two numbers and print the result."""
+
+
+def add(first, second):
+    """Return the sum of two numbers."""
+    return first + second
+
+
+if __name__ == "__main__":
+    print(add(5, 10))
+`,
+      messy: `import os
+def add(a,b):
+    unused = 5
+    return a+b
+x=add(1,2)
+`,
+      complex: `def score_user(a, b, c, d):
+    total = 0
+    if a > 1:
+        total += 1
+    if a > 2:
+        total += 1
+    if a > 3:
+        total += 1
+    if b > 1:
+        total += 1
+    if b > 2:
+        total += 1
+    if b > 3:
+        total += 1
+    if c > 1:
+        total += 1
+    if c > 2:
+        total += 1
+    if c > 3:
+        total += 1
+    if d > 1:
+        total += 1
+    if d > 2:
+        total += 1
+    if d > 3:
+        total += 1
+    return total
+`,
+      syntax: `def greet(name)
+    print("Hello", name
+`
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s).replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    function setStatus(text, isError = false) {
+      const el = $("status");
+      el.textContent = text;
+      el.className = isError ? "error" : "";
+    }
+
+    async function init() {
+      try {
+        setStatus("Loading Python in your browser. The first load takes 20 to 40 seconds...");
+        pyodide = await loadPyodide();
+        await pyodide.loadPackage("micropip");
+        const micropip = pyodide.pyimport("micropip");
+        await micropip.install(["pyflakes", "pycodestyle", "radon"]);
+        const source = await (await fetch("analyzer.py")).text();
+        pyodide.runPython(source);
+        $("check").disabled = false;
+        setStatus("Ready. Paste code or pick an example, then click Check code.");
+      } catch (e) {
+        setStatus("Could not load the checker: " + e, true);
+      }
+    }
+
+    function load(key) {
+      $("code").value = EXAMPLES[key];
+      updateCount();
+      $("code").focus();
+    }
+
+    function clearBox() {
+      $("code").value = "";
+      updateCount();
+      $("code").focus();
+    }
+
+    function updateCount() {
+      $("count").textContent = $("code").value.length + " / " + MAX + " characters · Ctrl + Enter to check";
+    }
+
+    function check() {
+      const code = $("code").value;
+      if (!pyodide) return;
+      if (!code.trim()) { setStatus("Please paste some code first.", true); return; }
+      if (code.length > MAX) { setStatus("Code is too long. The limit is " + MAX + " characters.", true); return; }
+
+      setStatus("Checking...");
+      const data = JSON.parse(pyodide.globals.get("analyze")(code));
+      setStatus("Check complete.");
+      render(data);
+    }
+
+    function render(d) {
+      const rows = d.issues.map(i => `
+        <tr>
+          <td>${i.line}</td>
+          <td>${esc(i.tool)}</td>
+          <td class="code">${esc(i.code)}</td>
+          <td><span class="badge ${i.letter}">${esc(i.label)}</span></td>
+          <td>${esc(i.msg)}</td>
+        </tr>`).join("");
+
+      $("results").innerHTML = `
+        <div class="summary">
+          <div class="tile">
+            <div class="verdict ${d.passed ? "pass" : "fail"}">${d.passed ? "PASSED" : "FAILED"}</div>
+            <div class="label">Overall result</div>
+          </div>
+          <div class="tile"><div class="big">${d.blocking}</div><div class="label">Blocking issues (errors and bugs)</div></div>
+          <div class="tile"><div class="big">${d.style}</div><div class="label">Style issues (advisory)</div></div>
+          <div class="tile"><div class="big">${d.complexity}</div><div class="label">Complex functions (advisory)</div></div>
+        </div>
+        <h3>Issues found</h3>
+        ${d.issues.length ? `
+          <table>
+            <thead><tr><th>Line</th><th>Tool</th><th>Code</th><th>Type</th><th>Message</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>` : `<div class="empty">No issues found. Your code is clean.</div>`}
+      `;
+    }
+
+    $("code").addEventListener("input", updateCount);
+    $("code").addEventListener("keydown", (e) => {
+      if (e.ctrlKey && e.key === "Enter") check();
+    });
+
+    init();
+  </script>
+</body>
+</html>
